@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# KVAULT runtime
+*.kvault
+*.kvault.tmp
+*.v1bak
+*.v2bak
+
+# Editor temp files (kvault edit/describe)
+kvault_edit_*
+kvault_save_*
+kvault_desc_*
+
+# Config
+.kvault_config
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Node (doc generator — not needed in repo)
+node_modules/
+make_docs.js
+
+# Misc
+*.log
+*.swp
+*~

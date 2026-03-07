@@ -1,0 +1,4 @@
+argon2-cffi>=21.3.0
+cryptography>=41.0.0
+# Optional: zstandard compression (fast zstd algorithm)
+# pip install zstandard

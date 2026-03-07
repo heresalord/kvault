@@ -1,0 +1,14 @@
+  FILE OPERATIONS
+  ─────────────────────────────────────────────────────────────────────────
+  add <path> [path2…]                encrypt & store one or more files
+  add --recursive <dir>              recursively add all files in directory
+  ls                                 list all files (name, ext, size, type, date)
+  get <# or name>                    decrypt & extract to current directory
+  get <# or name> --to <path>        decrypt & extract to an exact path
+  get <# or name> --tofolder <n>  search for a folder by name & extract there
+  view <# or name>                   preview text file in terminal
+  cat <# or name>                    alias for view
+  rename <# or name> <new-name>      rename a stored file
+  rm <# or name>                     remove file from vault
+  export <dest-dir>                  decrypt all files to a folder
+  export --tofolder <n>           search for a folder by name & export there
