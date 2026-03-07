@@ -4,7 +4,7 @@
 # Usage: sh github_setup.sh [your-github-username]
 set -e
 
-GITHUB_USER="${1:-kms-studio}"
+GITHUB_USER="${1:-heresalord}"
 REPO_NAME="kvault"
 REMOTE="https://github.com/${GITHUB_USER}/${REPO_NAME}.git"
 
