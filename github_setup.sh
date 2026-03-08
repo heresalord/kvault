@@ -57,8 +57,8 @@ build/
 *.spec
 
 # Vault files (never commit these!)
-*.kvault
-*.kvault.tmp
+*.kvt
+*.kvt.tmp
 *.v1bak
 *.v2bak
 
@@ -84,13 +84,17 @@ info "Staging files…"
 git add -A
 
 # 6. Commit
-COMMIT_MSG="Initial release: KVAULT v2.0.0
+COMMIT_MSG="Security hardening + .kvt extension: KVAULT v3.0.0
 
 - AES-256-GCM encryption with per-blob random IV
 - Argon2id key derivation (64 MB · 3 iterations · 4 threads)
 - HMAC-SHA256 vault integrity — 4 tamper-detection layers
 - Append-only log with automatic compaction
-- mlock / VirtualLock key page protection (no Node.js)
+- Non-descriptive magic bytes (no tool fingerprint in file header)
+- Vault files use .kvt extension (shorter, less identifiable)
+- 3-pass wipe on temp files + vault delete (0x00->0xFF->0x00 + fsync)
+- Clipboard opt-in via --clip flag (no silent clipboard writes)
+- readline history disabled (no REPL commands written to disk)
 - Windows, macOS, Linux support (Rust / C / Python)
 - Persisted brute-force counter + FROZEN vault state
 - Recovery phrase as second factor for FROZEN vaults

@@ -13,7 +13,13 @@ import stat
 import subprocess
 
 try:
-    import readline as _rl  # noqa: F401  — arrow-key history on macOS/Linux
+    import readline as _rl
+    # Disable on-disk history file — REPL commands must never be written to
+    # ~/.python_history or any other file (commands could reveal vault names,
+    # file paths, or accidentally-typed passwords).
+    _rl.set_history_length(0)
+    try: _rl.write_history_file = lambda *a, **kw: None
+    except AttributeError: pass
 except ImportError:
     pass
 

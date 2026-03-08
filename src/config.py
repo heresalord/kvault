@@ -4,15 +4,20 @@ KVAULT Configuration Constants  —  Phase 3
 
 VERSION = "3.0.0"
 FORMAT_VERSION = 0x03
-MAGIC = b"KVLT"
+
+# MAGIC bytes: used only as an internal sanity check after HMAC+AES verification.
+# Deliberately non-descriptive — does NOT identify this as KVAULT to an observer.
+# The first 4 bytes of a .kvault file reveal nothing about the tool.
+MAGIC = b"\xAF\x9C\x4E\x7B"
 
 # Argon2id parameters
+# Note: "type" key is intentionally omitted — deriveKey() always uses Type.ID.
+# It is not passed to hash_secret_raw to avoid accidental override.
 ARGON2_CONFIG = {
     "time_cost":   3,
     "memory_cost": 65536,   # 64 MB
     "parallelism": 4,
     "hash_len":    32,
-    "type":        "id",
 }
 
 # Crypto constants
@@ -67,8 +72,11 @@ FOLDER_SEARCH_MAX_DEPTH = 3
 # Config file
 CONFIG_FILENAME = ".kvault_config"
 
-# Clipboard clear delay after view/cat (seconds). 0 = disabled.
-CLIPBOARD_CLEAR_SECONDS = 30
+# Clipboard: copy to clipboard after view/cat.
+# CLIPBOARD_COPY = False means nothing is ever sent to the clipboard.
+# CLIPBOARD_CLEAR_SECONDS = how long before auto-clear (0 = no auto-clear).
+CLIPBOARD_COPY           = False   # opt-in: user must pass --clip to view/cat
+CLIPBOARD_CLEAR_SECONDS  = 30
 
 # ── Phase 3 ──────────────────────────────────────────────────────────────────
 

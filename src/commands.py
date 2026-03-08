@@ -27,7 +27,7 @@ from src.vault import Vault, expandGlob
 from src.config import (
     BRUTEFORCE_DELAYS, BRUTEFORCE_LOCKOUT_THRESHOLD, BRUTEFORCE_LOCKOUT_SECONDS,
     VAULT_SEARCH_DIRS, FOLDER_SEARCH_ROOTS, FOLDER_SEARCH_MAX_DEPTH,
-    CLIPBOARD_CLEAR_SECONDS,
+    CLIPBOARD_COPY, CLIPBOARD_CLEAR_SECONDS,
 )
 from src import ui
 
@@ -216,7 +216,7 @@ def findVaultsOnMachine(extra_path: str = None) -> list:
     found = []; seen = set()
     for d in dirs:
         try:
-            for f in sorted(d.glob("*.kvault")):
+            for f in sorted(d.glob("*.kvt")):
                 k = str(f.resolve())
                 if k not in seen: seen.add(k); found.append(str(f))
         except PermissionError: pass
@@ -224,7 +224,7 @@ def findVaultsOnMachine(extra_path: str = None) -> list:
 
 
 def findVaultsInCwd() -> list:
-    return [p.stem for p in sorted(Path.cwd().glob("*.kvault"))]
+    return [p.stem for p in sorted(Path.cwd().glob("*.kvt"))]
 
 
 def _resolveVaultPath(query: str) -> Optional[Path]:
@@ -237,10 +237,10 @@ def _resolveVaultPath(query: str) -> Optional[Path]:
     expanded = Path(query).expanduser()
     if expanded.is_absolute() or query.startswith("~"):
         if expanded.exists(): return expanded
-        w = expanded.with_suffix(".kvault")
+        w = expanded.with_suffix(".kvt")
         if w.exists(): return w
-    stem = query[:-7] if query.lower().endswith(".kvault") else query
-    c = Path.cwd() / f"{stem}.kvault"
+    stem = query[:-4] if query.lower().endswith(".kvt") else query
+    c = Path.cwd() / f"{stem}.kvt"
     if c.exists(): return c
     if not _vault_list_cache: _vault_list_cache = findVaultsOnMachine()
     for cached in _vault_list_cache:
@@ -274,7 +274,7 @@ def cmdVaultNew(args: list):
         elif args[i] == "--recovery": ask_recovery = True; i += 1
         else: name = args[i]; i += 1
     if not name: print(ui.error("Provide a vault name.")); return
-    path = Path.cwd() / f"{name}.kvault"
+    path = Path.cwd() / f"{name}.kvt"
     if path.exists(): print(ui.error(f"Vault already exists: {path}")); return
     pw1 = promptPassword("Master password: ")
     if not pw1: return
@@ -301,8 +301,8 @@ def cmdVaultOpen(args: list):
     if args[0] == "--tofolder" and len(args) > 1:
         folder = _resolveFolderArg(args[1])
         if folder is None: return
-        kvaults = list(folder.glob("*.kvault"))
-        if not kvaults: print(ui.error(f"No .kvault files in: {folder}")); return
+        kvaults = list(folder.glob("*.kvt"))
+        if not kvaults: print(ui.error(f"No .kvt files in: {folder}")); return
         if len(kvaults) == 1:
             path = kvaults[0]; print(ui.info_msg(f"Found: {path}"))
         else:
@@ -390,8 +390,12 @@ def cmdVaultDelete(args: list):
     _open_vaults.pop(name, None); current_vault.lock(); current_vault = None
     try:
         size = path.stat().st_size
-        with open(path, "wb") as f: f.write(b"\x00" * size)
-        path.unlink(); print(ui.success(f"Vault '{name}' permanently destroyed."))
+        # 3-pass wipe matching the in-memory key wipe (0x00 → 0xFF → 0x00)
+        with open(path, "r+b") as f:
+            for val in (b"\x00", b"\xff", b"\x00"):
+                f.seek(0); f.write(val * size); f.flush(); os.fsync(f.fileno())
+        path.unlink()
+        print(ui.success(f"Vault '{name}' permanently destroyed."))
     except Exception as e: print(ui.error(f"Error: {e}"))
 
 
@@ -561,8 +565,14 @@ def cmdFileGet(args: list):
 
 
 def cmdFileView(args: list):
+    """
+    view <# or name>          preview a text file in the terminal
+    view <# or name> --clip   also copy to clipboard (auto-clears after CLIPBOARD_CLEAR_SECONDS)
+    """
     if not _requireOpen(): return
-    if not args: print(ui.error("Usage: view <# or name>")); return
+    if not args: print(ui.error("Usage: view <# or name>  [--clip]")); return
+    clip = "--clip" in args
+    args = [a for a in args if a != "--clip"]
     entry = current_vault.findEntry(" ".join(args))
     if entry is None:
         print(ui.error(f"File not found: {args[0]}")); _suggestFiles(args[0]); return
@@ -572,8 +582,10 @@ def cmdFileView(args: list):
         print(f"\n{ui._c('muted')}" + "─"*62 + ui._reset())
         print(text)
         print(f"{ui._c('muted')}" + "─"*62 + ui._reset() + "\n")
-        if CLIPBOARD_CLEAR_SECONDS > 0:
-            _copyToClipboard(text); _scheduleClear(CLIPBOARD_CLEAR_SECONDS)
+        # Clipboard is opt-in: requires --clip flag OR CLIPBOARD_COPY = True in config
+        if clip or CLIPBOARD_COPY:
+            _copyToClipboard(text)
+            _scheduleClear(CLIPBOARD_CLEAR_SECONDS)
             print(ui.info_msg(f"Copied to clipboard — auto-clears in {CLIPBOARD_CLEAR_SECONDS}s."))
     except ValueError as e: print(ui.warn(str(e)))
     except Exception as e: print(ui.error(f"Failed: {e}"))
@@ -964,27 +976,39 @@ def cmdDescribe(args: list):
     if args[0] == "--edit":
         import tempfile, subprocess, os as _os
         current = current_vault.getDescription()
+        tmp = None
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False,
             prefix="kvault_desc_", encoding="utf-8"
         ) as tf:
             tf.write(current)
             tmp = tf.name
-        editor = _os.environ.get("VISUAL") or _os.environ.get("EDITOR") or "nano"
+        new_desc = ""
         try:
-            subprocess.run([editor, tmp], check=False)
-        except FileNotFoundError:
-            try: subprocess.run(["vi", tmp], check=False)
+            editor = _os.environ.get("VISUAL") or _os.environ.get("EDITOR") or "nano"
+            try:
+                subprocess.run([editor, tmp], check=False)
             except FileNotFoundError:
-                _os.unlink(tmp)
-                print(ui.error("No editor found. Set $EDITOR or use: describe <text>")); return
-        try:
+                try: subprocess.run(["vi", tmp], check=False)
+                except FileNotFoundError:
+                    print(ui.error("No editor found. Set $EDITOR or use: describe <text>"))
+                    return
             new_desc = open(tmp, encoding="utf-8").read().strip()
         finally:
-            try: _os.unlink(tmp)
-            except: pass
-        current_vault.setDescription(new_desc)
-        print(ui.success("Description saved."))
+            # 3-pass wipe then delete the temp description file
+            if tmp and _os.path.exists(tmp):
+                try:
+                    size = _os.path.getsize(tmp)
+                    with open(tmp, "r+b") as wf:
+                        for val in (b"\x00", b"\xff", b"\x00"):
+                            wf.seek(0); wf.write(val * size)
+                    _os.unlink(tmp)
+                except Exception:
+                    try: _os.unlink(tmp)
+                    except: pass
+        if new_desc:
+            current_vault.setDescription(new_desc)
+            print(ui.success("Description saved."))
         return
 
     # Inline: describe This is my secret archive

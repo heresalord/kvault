@@ -91,26 +91,29 @@ def _decompress(data: bytes, algorithm: str) -> bytes:
 
 
 # ─── Padding  (hides exact blob size from hex-dump observers) ────────────────
+# Uses a 2-byte little-endian length prefix instead of PKCS#7 so that block
+# sizes larger than 255 bytes (e.g. 512) work correctly for any file size.
 
 def _pad(data: bytes, block_size: int) -> bytes:
-    """PKCS#7-style padding to next multiple of block_size. 0 = disabled."""
+    """Pad data to next multiple of block_size, storing length in a 2-byte LE prefix."""
     if block_size <= 0:
         return data
-    remainder = len(data) % block_size
-    pad_len   = block_size - remainder if remainder else block_size
-    return data + bytes([pad_len] * pad_len)
+    # +2 for the prefix itself
+    padded_len = (len(data) + 2 + block_size - 1) // block_size * block_size
+    pad_len    = padded_len - len(data) - 2
+    prefix     = struct.pack("<H", pad_len)   # 2-byte LE: 0–65535 padding bytes
+    return prefix + data + bytes(pad_len)
 
 
 def _unpad(data: bytes, block_size: int) -> bytes:
-    """Remove PKCS#7-style padding."""
-    if block_size <= 0 or not data:
+    """Remove padding added by _pad."""
+    if block_size <= 0 or len(data) < 2:
         return data
-    pad_len = data[-1]
-    if pad_len == 0 or pad_len > block_size or pad_len > len(data):
+    pad_len = struct.unpack("<H", data[:2])[0]
+    if 2 + pad_len > len(data):
+        # Doesn't look like our padding — return as-is (legacy/unpadded blob)
         return data
-    if data[-pad_len:] != bytes([pad_len] * pad_len):
-        return data
-    return data[:-pad_len]
+    return data[2:len(data) - pad_len]
 
 
 # ─── Glob expansion ──────────────────────────────────────────────────────────
@@ -430,7 +433,9 @@ class Vault:
 
         suffix = Path(name).suffix or ".txt"
 
-        # Write current content to temp file so editor opens with existing text
+        # Write current content to temp file so editor opens with existing text.
+        # Always delete & wipe in a finally block — even on crash or SIGTERM.
+        tmp_edit = None
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=suffix, delete=False,
             prefix="kvault_edit_", encoding="utf-8"
@@ -438,26 +443,33 @@ class Vault:
             tf.write(initial_content)
             tmp_edit = tf.name
 
-        # Open editor — prefer $VISUAL > $EDITOR > nano > vi
-        editor = _os.environ.get("VISUAL") or _os.environ.get("EDITOR") or "nano"
+        new_content = ""
         try:
-            subprocess.run([editor, tmp_edit], check=False)
-        except FileNotFoundError:
+            # Open editor — prefer $VISUAL > $EDITOR > nano > vi
+            editor = _os.environ.get("VISUAL") or _os.environ.get("EDITOR") or "nano"
             try:
-                subprocess.run(["vi", tmp_edit], check=False)
+                subprocess.run([editor, tmp_edit], check=False)
             except FileNotFoundError:
-                _os.unlink(tmp_edit)
-                raise RuntimeError(
-                    "No terminal editor found (tried nano and vi). "
-                    "Set $EDITOR to your preferred editor."
-                )
-
-        # Read edited content
-        try:
+                try:
+                    subprocess.run(["vi", tmp_edit], check=False)
+                except FileNotFoundError:
+                    raise RuntimeError(
+                        "No terminal editor found (tried nano and vi). "
+                        "Set $EDITOR to your preferred editor."
+                    )
             new_content = Path(tmp_edit).read_text(encoding="utf-8")
         finally:
-            try: _os.unlink(tmp_edit)
-            except: pass
+            # Wipe then delete the plaintext temp file regardless of outcome
+            if tmp_edit and _os.path.exists(tmp_edit):
+                try:
+                    size = _os.path.getsize(tmp_edit)
+                    with open(tmp_edit, "r+b") as wf:
+                        for val in (b"\x00", b"\xff", b"\x00"):
+                            wf.seek(0); wf.write(val * size)
+                    _os.unlink(tmp_edit)
+                except Exception:
+                    try: _os.unlink(tmp_edit)
+                    except: pass
 
         # Write to a second temp file so addFile can read it as a Path
         with tempfile.NamedTemporaryFile(
